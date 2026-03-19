@@ -1,8 +1,7 @@
-ccxt==4.3.89
-pandas==2.2.2
-numpy==1.26.4
-pandas-ta==0.3.14b0
+ccxt>=4.3.89
+pandas>=2.2.0
+numpy>=1.26.4
 APScheduler==3.10.4
-python-dotenv==1.0.1
-requests==2.32.3
-pytz==2024.1
+python-dotenv>=1.0.1
+requests>=2.32.3
+pytz>=2024.1
