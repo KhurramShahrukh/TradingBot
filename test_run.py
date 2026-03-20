@@ -52,7 +52,12 @@ def check_config() -> dict | None:
         with open("config.json") as f:
             cfg = json.load(f)
         paper = cfg.get("paper_trading", True)
-        print(f"{PASS} config.json — paper_trading={paper}, pair={cfg['trading_pair']}, tf={cfg['timeframe']}")
+        plist = cfg.get("trading_pairs")
+        if isinstance(plist, list) and plist:
+            pair_line = ", ".join(plist)
+        else:
+            pair_line = cfg.get("trading_pair", "BTC/USDT")
+        print(f"{PASS} config.json — paper_trading={paper}, pairs={pair_line}, tf={cfg['timeframe']}")
         if not paper:
             print("       WARNING: paper_trading is FALSE — bot will place REAL orders!")
         return cfg
@@ -61,12 +66,16 @@ def check_config() -> dict | None:
         return None
 
 
-def check_data_feed() -> tuple:
+def check_data_feed(config: dict) -> tuple:
     try:
         from modules.data_feed import fetch_ohlcv, get_current_price
-        df = fetch_ohlcv(limit=100)
-        price = get_current_price()
-        print(f"{PASS} data_feed — fetched {len(df)} candles, BTC price ${price:,.2f}")
+        plist = config.get("trading_pairs")
+        pair = plist[0] if isinstance(plist, list) and plist else config.get("trading_pair", "BTC/USDT")
+        tf = config.get("timeframe", "15m")
+        df = fetch_ohlcv(pair, tf, limit=100)
+        price = get_current_price(pair)
+        base = pair.split("/")[0]
+        print(f"{PASS} data_feed — fetched {len(df)} candles, {base} price ${price:,.2f}")
         return df, price
     except Exception as e:
         print(f"{FAIL} data_feed — {e}")
@@ -193,7 +202,7 @@ def main() -> None:
 
     # 2. Market data
     print("\n[3/9] Binance data feed")
-    df, price = check_data_feed()
+    df, price = check_data_feed(config)
     if df is None:
         print("\nCannot continue without market data.")
         sys.exit(1)
