@@ -1,6 +1,6 @@
 {
   "trading_pair": "BTC/USDT",
-  "timeframe": "1h",
+  "timeframe": "15m",
   "trade_amount_pct": 100,
   "stop_loss_pct": 0.5,
   "take_profit_pct": 1.2,
@@ -10,5 +10,5 @@
   "ema_fast": 9,
   "ema_slow": 21,
   "paper_trading": true,
-  "starting_balance_usdt": 35.00
+  "starting_balance_usdt": 34.00
 }

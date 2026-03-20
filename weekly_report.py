@@ -40,7 +40,7 @@ def _load_config() -> dict:
         with open("config.json") as f:
             return json.load(f)
     except Exception:
-        return {"starting_balance_usdt": 35.0}
+        return {"starting_balance_usdt": 34.0}
 
 
 def _bar(value: float, max_val: float, width: int = 20, char: str = "█") -> str:
@@ -57,7 +57,7 @@ def _sep(char: str = "─", width: int = 55) -> str:
 def main() -> None:
     trades = _load_trades()
     config = _load_config()
-    starting = config.get("starting_balance_usdt", 35.0)
+    starting = config.get("starting_balance_usdt", 34.0)
 
     now_pkt = datetime.now(PKT).strftime("%Y-%m-%d %H:%M PKT")
 

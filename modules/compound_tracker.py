@@ -68,7 +68,7 @@ def get_portfolio_snapshot(starting_balance: float) -> dict:
 
 
 if __name__ == "__main__":
-    STARTING = 35.00
+    STARTING = 34.00
 
     snap = get_portfolio_snapshot(STARTING)
     print("Portfolio snapshot:")

@@ -1,5 +1,6 @@
 .env
 *.db
+compound_state.json
 logs/
 __pycache__/
 *.pyc

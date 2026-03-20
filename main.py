@@ -1,9 +1,9 @@
 """
 main.py — Trading Bot entry point.
 
-Starts an APScheduler job that runs bot_cycle() at the top of every hour
-(i.e., on each 1-hour candle close).  All configuration is loaded from
-config.json; all credentials from .env.
+Starts an APScheduler job that runs bot_cycle() on each candle close for the
+timeframe set in config.json (e.g. 15m → every 15 minutes).  All configuration
+is loaded from config.json; all credentials from .env.
 """
 
 import json
@@ -60,6 +60,28 @@ def load_config() -> dict:
         return json.load(f)
 
 
+def _cron_minute_for_timeframe(timeframe: str) -> str | int:
+    """
+    Map CCXT timeframe string to APScheduler cron `minute` expression.
+    Aligns bot_cycle with each candle close for that interval.
+    """
+    tf = (timeframe or "15m").strip().lower()
+    match tf:
+        case "1m":
+            return "*"
+        case "5m":
+            return "*/5"
+        case "15m":
+            return "0,15,30,45"
+        case "30m":
+            return "0,30"
+        case "1h" | "60m":
+            return 0
+        case _:
+            # Unknown timeframe — default to 15m cadence (safe for active trading)
+            return "0,15,30,45"
+
+
 def _pkt_now() -> str:
     return datetime.now(PKT).strftime("%Y-%m-%d %H:%M PKT")
 
@@ -71,7 +93,7 @@ def bot_cycle() -> None:
     config = load_config()
     paper  = config.get("paper_trading", True)
     pair   = config.get("trading_pair",  "BTC/USDT")
-    start  = config.get("starting_balance_usdt", 35.00)
+    start  = config.get("starting_balance_usdt", 34.00)
 
     log.info("─── bot_cycle started (%s) ───", _pkt_now())
 
@@ -94,7 +116,7 @@ def bot_cycle() -> None:
         # 2. Fetch market data
         df    = fetch_ohlcv(pair, config["timeframe"], limit=100)
         price = get_current_price(pair)
-        log.info("Current %s price: $%,.2f", pair, price)
+        log.info(f"Current {pair} price: ${price:,.2f}")
 
         # 3. Generate signal
         sig = generate_signal(
@@ -104,10 +126,7 @@ def bot_cycle() -> None:
             buy_price=_state["buy_price"],
             current_price=price,
         )
-        log.info("Signal: %s — %s (pattern=%s, RSI=%.1f)",
-                 sig["signal"], sig["reason"],
-                 sig["pattern"] or "None",
-                 sig["rsi"] or 0)
+        log.info(f"Signal: {sig['signal']} — {sig['reason']} (pattern={sig['pattern'] or 'None'}, RSI={sig['rsi'] or 0:.1f})")
 
         portfolio = get_portfolio_snapshot(start)
 
@@ -146,9 +165,7 @@ def bot_cycle() -> None:
                 "take_profit_pct": params["take_profit_pct"],
             }, portfolio)
 
-            log.info("BUY executed: $%.2f USDT @ $%,.2f  SL=$%,.2f  TP=$%,.2f",
-                     amount, order["price"],
-                     params["stop_loss_price"], params["take_profit_price"])
+            log.info(f"BUY executed: ${amount:.2f} USDT @ ${order['price']:,.2f}  SL=${params['stop_loss_price']:,.2f}  TP=${params['take_profit_price']:,.2f}")
 
         # 5. Execute SELL
         elif sig["signal"] == "SELL" and _state["position_open"]:
@@ -171,7 +188,7 @@ def bot_cycle() -> None:
                 "signal": sig["reason"],
             }, portfolio)
 
-            log.info("SELL executed: P&L=$%+.4f  new balance=$%.2f", pnl, new_balance)
+            log.info(f"SELL executed: P&L=${pnl:+.4f}  new balance=${new_balance:.2f}")
 
             # Reset position state
             _state["position_open"] = False
@@ -191,7 +208,7 @@ def bot_cycle() -> None:
             send_alert(
                 "ERROR",
                 {"error_message": f"{type(exc).__name__}: {exc}"},
-                get_portfolio_snapshot(config.get("starting_balance_usdt", 35.00)),
+                get_portfolio_snapshot(config.get("starting_balance_usdt", 34.00)),
             )
         except Exception:
             log.error("Also failed to send error email.")
@@ -201,7 +218,7 @@ def bot_cycle() -> None:
 
 def send_daily_summary() -> None:
     config  = load_config()
-    start   = config.get("starting_balance_usdt", 35.00)
+    start   = config.get("starting_balance_usdt", 34.00)
     snap    = get_portfolio_snapshot(start)
     today   = datetime.now(PKT).date().isoformat()
     trades  = get_today_trade_count()
@@ -224,17 +241,18 @@ def main() -> None:
     pair   = config.get("trading_pair", "BTC/USDT")
     paper  = config.get("paper_trading", True)
 
-    log.info("Pair: %s | Timeframe: %s | Paper: %s", pair, config["timeframe"], paper)
+    tf = config.get("timeframe", "15m")
+    log.info("Pair: %s | Timeframe: %s | Paper: %s", pair, tf, paper)
 
     scheduler = BlockingScheduler(timezone=PKT)
 
-    # Run bot cycle at the top of every hour (candle close for 1h chart)
+    minute_cron = _cron_minute_for_timeframe(tf)
     scheduler.add_job(
         bot_cycle,
         trigger="cron",
-        minute=0,
+        minute=minute_cron,
         id="bot_cycle",
-        name="Bot cycle (1h candle close)",
+        name=f"Bot cycle ({tf} candle close)",
         misfire_grace_time=120,
     )
 
@@ -248,10 +266,10 @@ def main() -> None:
         name="Daily summary email",
     )
 
-    log.info("Scheduler started. Waiting for next full hour …")
+    log.info("Scheduler started. Next cycle at each %s candle close (minute=%s).", tf, minute_cron)
     log.info("Press Ctrl+C to stop.")
 
-    # Run once immediately on startup so we don't have to wait an hour
+    # Run once immediately on startup so we don't wait for the first boundary
     log.info("Running initial bot_cycle on startup …")
     bot_cycle()
 

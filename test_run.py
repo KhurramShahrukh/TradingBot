@@ -118,7 +118,8 @@ def check_signal(df, price, config) -> None:
 def check_risk_manager(price, config) -> None:
     try:
         from modules.risk_manager import get_risk_parameters, is_daily_loss_limit_breached
-        params = get_risk_parameters(price, 35.0, config)
+        start = config.get("starting_balance_usdt", 34.0)
+        params = get_risk_parameters(price, start, config)
         print(
             f"{PASS} risk_manager — size=${params['position_size_usdt']:.2f}, "
             f"SL=${params['stop_loss_price']:,.2f}, TP=${params['take_profit_price']:,.2f}"
@@ -140,10 +141,11 @@ def check_database() -> None:
         traceback.print_exc()
 
 
-def check_email() -> None:
+def check_email(config) -> None:
     try:
         from modules.email_alerts import send_alert
-        portfolio = {"starting": 35.0, "current": 35.0, "pnl_today": 0.0, "total_pnl": 0.0}
+        start = config.get("starting_balance_usdt", 34.0)
+        portfolio = {"starting": start, "current": start, "pnl_today": 0.0, "total_pnl": 0.0}
         ok = send_alert(
             "ERROR",
             {"error_message": "Pre-flight test — Trading Bot is online and ready."},
@@ -158,10 +160,11 @@ def check_email() -> None:
         traceback.print_exc()
 
 
-def check_paper_executor(price) -> None:
+def check_paper_executor(price, config) -> None:
     try:
         from modules.order_executor import execute_buy, execute_sell
-        buy  = execute_buy("BTC/USDT", 35.00, price, paper=True)
+        start = config.get("starting_balance_usdt", 34.0)
+        buy  = execute_buy("BTC/USDT", start, price, paper=True)
         sell = execute_sell("BTC/USDT", buy["quantity"], price * 1.01, paper=True)
         pnl  = sell["amount"] - buy["amount"]
         print(f"{PASS} order_executor — paper BUY then SELL simulated, P&L=${pnl:+.4f}")
@@ -213,11 +216,11 @@ def main() -> None:
     check_database()
 
     print("\n[9/9] Paper order executor")
-    check_paper_executor(price)
+    check_paper_executor(price, config)
 
     # 5. Email last (so user must wait for inbox confirm)
     print("\n[BONUS] Email alert")
-    check_email()
+    check_email(config)
 
     print("\n" + "=" * 55)
     print("  Pre-flight complete.")
