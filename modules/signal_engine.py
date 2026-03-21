@@ -13,6 +13,10 @@ def generate_signal(
     """
     Analyse indicators + candlestick patterns and return a signal dict.
 
+    BUY (config-driven):
+        Three legs: bullish pattern, RSI < rsi_oversold, close > EMA21.
+        buy_min_conditions: 2 → any two legs; 3 → all three (strict / default).
+
     Signal dict keys:
         signal        — "BUY" | "SELL" | "HOLD"
         reason        — human-readable explanation
@@ -70,27 +74,32 @@ def generate_signal(
 
     # ── BUY checks (only when no position is open) ────────────────────────────
     if not position_open:
-        buy_conditions = []
+        above_ema_slow = ema_slow is not None and close > ema_slow
 
-        if is_bullish_pattern(pattern):
-            buy_conditions.append(f"{pattern}")
-
-        if rsi is not None and rsi < rsi_oversold:
-            buy_conditions.append(f"RSI {rsi:.1f}")
-
-        above_ema_slow = (ema_slow is not None and close > ema_slow)
-        if above_ema_slow:
-            buy_conditions.append("above EMA21")
-
-        # All 3 conditions must align for a BUY
         bullish_pat_present = is_bullish_pattern(pattern)
         rsi_ok              = rsi is not None and rsi < rsi_oversold
         trend_ok            = above_ema_slow
 
-        if bullish_pat_present and rsi_ok and trend_ok:
+        # How many of the three legs must be true (2 = more trades, 3 = strict/original)
+        min_req = int(config.get("buy_min_conditions", 3))
+        min_req = max(1, min(3, min_req))
+
+        satisfied = int(bullish_pat_present) + int(rsi_ok) + int(trend_ok)
+
+        if satisfied >= min_req:
+            parts: list[str] = []
+            if bullish_pat_present and pattern:
+                parts.append(pattern)
+            elif bullish_pat_present:
+                parts.append("bullish pattern")
+            if rsi_ok and rsi is not None:
+                parts.append(f"RSI {rsi:.1f}")
+            if trend_ok:
+                parts.append("above EMA21")
+
             result.update(
                 signal="BUY",
-                reason=" + ".join(buy_conditions),
+                reason=" + ".join(parts) if parts else f"{satisfied}/{min_req} conditions",
             )
             return result
 

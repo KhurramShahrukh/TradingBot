@@ -100,9 +100,11 @@ def get_trading_pairs(config: dict) -> list[str]:
 
 
 def _pairs_label(pairs: list[str]) -> str:
-    """Short label for emails / logs (e.g. BTC+ETH+SOL+BNB)."""
+    """Short label for emails (e.g. BTC+ETH+…+32 markets)."""
     bases = [p.split("/")[0] for p in pairs]
-    return "+".join(bases)
+    if len(bases) <= 6:
+        return "+".join(bases)
+    return "+".join(bases[:6]) + f"+…({len(bases)} total)"
 
 
 # ── Core bot cycle ─────────────────────────────────────────────────────────────
@@ -114,7 +116,7 @@ def bot_cycle() -> None:
     pairs  = get_trading_pairs(config)
     start  = config.get("starting_balance_usdt", 34.00)
 
-    log.info("─── bot_cycle started (%s) — watching %s ───", _pkt_now(), ", ".join(pairs))
+    log.info("─── bot_cycle started (%s) — watching %d pairs ───", _pkt_now(), len(pairs))
 
     try:
         # 1. Check daily halt flag
@@ -189,64 +191,68 @@ def bot_cycle() -> None:
 
         # ── No position: scan pairs in order; first BUY wins ───────────────────
         for pair in pairs:
-            df    = fetch_ohlcv(pair, config["timeframe"], limit=100)
-            price = get_current_price(pair)
-            sig = generate_signal(
-                df,
-                config,
-                position_open=False,
-                buy_price=None,
-                current_price=price,
-            )
-            log.info(
-                f"[{pair}] ${price:,.2f}  →  {sig['signal']} — {sig['reason']} "
-                f"(RSI={sig['rsi'] or 0:.1f}, pat={sig['pattern'] or '—'})"
-            )
+            try:
+                df    = fetch_ohlcv(pair, config["timeframe"], limit=100)
+                price = get_current_price(pair)
+                sig = generate_signal(
+                    df,
+                    config,
+                    position_open=False,
+                    buy_price=None,
+                    current_price=price,
+                )
+                log.info(
+                    f"[{pair}] ${price:,.2f}  →  {sig['signal']} — {sig['reason']} "
+                    f"(RSI={sig['rsi'] or 0:.1f}, pat={sig['pattern'] or '—'})"
+                )
 
-            if sig["signal"] != "BUY":
+                if sig["signal"] != "BUY":
+                    continue
+
+                balance = get_current_balance(start)
+                params  = get_risk_parameters(price, balance, config)
+                amount  = params["position_size_usdt"]
+
+                if amount < 10:
+                    log.warning("[%s] Balance too low to trade (%.2f USDT < $10 minimum).", pair, amount)
+                    continue
+
+                order = execute_buy(pair, amount, price, paper=paper)
+
+                _state["position_open"] = True
+                _state["active_pair"]   = pair
+                _state["buy_price"]     = order["price"]
+                _state["buy_quantity"]  = order["quantity"]
+                _state["buy_amount"]    = order["amount"]
+                _state["stop_loss"]     = params["stop_loss_price"]
+                _state["take_profit"]   = params["take_profit_price"]
+                _state["signal_at_buy"] = sig["reason"]
+
+                portfolio = get_portfolio_snapshot(start)
+
+                log_trade("BUY", pair, order["price"], order["amount"],
+                          sig["reason"], 0.0, portfolio["current"])
+
+                send_alert("BUY", {
+                    "type":            "BUY",
+                    "pair":            pair,
+                    "price":           order["price"],
+                    "amount":          order["amount"],
+                    "signal":          sig["reason"],
+                    "stop_loss":       params["stop_loss_price"],
+                    "take_profit":     params["take_profit_price"],
+                    "stop_loss_pct":   params["stop_loss_pct"],
+                    "take_profit_pct": params["take_profit_pct"],
+                }, portfolio)
+
+                log.info(
+                    f"BUY executed ({pair}): ${amount:.2f} USDT @ ${order['price']:,.2f}  "
+                    f"SL=${params['stop_loss_price']:,.2f}  TP=${params['take_profit_price']:,.2f}"
+                )
+                return
+            except Exception as pair_exc:
+                log.warning("Skipping %s: %s", pair, pair_exc)
                 continue
-
-            balance = get_current_balance(start)
-            params  = get_risk_parameters(price, balance, config)
-            amount  = params["position_size_usdt"]
-
-            if amount < 10:
-                log.warning("[%s] Balance too low to trade (%.2f USDT < $10 minimum).", pair, amount)
-                continue
-
-            order = execute_buy(pair, amount, price, paper=paper)
-
-            _state["position_open"] = True
-            _state["active_pair"]   = pair
-            _state["buy_price"]     = order["price"]
-            _state["buy_quantity"]  = order["quantity"]
-            _state["buy_amount"]    = order["amount"]
-            _state["stop_loss"]     = params["stop_loss_price"]
-            _state["take_profit"]   = params["take_profit_price"]
-            _state["signal_at_buy"] = sig["reason"]
-
-            portfolio = get_portfolio_snapshot(start)
-
-            log_trade("BUY", pair, order["price"], order["amount"],
-                      sig["reason"], 0.0, portfolio["current"])
-
-            send_alert("BUY", {
-                "type":            "BUY",
-                "pair":            pair,
-                "price":           order["price"],
-                "amount":          order["amount"],
-                "signal":          sig["reason"],
-                "stop_loss":       params["stop_loss_price"],
-                "take_profit":     params["take_profit_price"],
-                "stop_loss_pct":   params["stop_loss_pct"],
-                "take_profit_pct": params["take_profit_pct"],
-            }, portfolio)
-
-            log.info(
-                f"BUY executed ({pair}): ${amount:.2f} USDT @ ${order['price']:,.2f}  "
-                f"SL=${params['stop_loss_price']:,.2f}  TP=${params['take_profit_price']:,.2f}"
-            )
-            return
 
         log.info("HOLD — no BUY signal on any watched pair.")
 
