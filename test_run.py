@@ -35,8 +35,8 @@ def check_env() -> bool:
     required = [
         "BINANCE_API_KEY",
         "BINANCE_SECRET_KEY",
+        "SENDGRID_API_KEY",
         "EMAIL_SENDER",
-        "EMAIL_APP_PASSWORD",
         "EMAIL_RECEIVER",
     ]
     missing = [k for k in required if not os.getenv(k)]
@@ -163,7 +163,7 @@ def check_email(config) -> None:
         if ok:
             print(f"{PASS} email_alerts — test email sent! Check your inbox.")
         else:
-            print(f"{FAIL} email_alerts — send failed (check EMAIL_APP_PASSWORD in .env)")
+            print(f"{FAIL} email_alerts — send failed (check SENDGRID_API_KEY in .env)")
     except Exception as e:
         print(f"{FAIL} email_alerts — {e}")
         traceback.print_exc()
