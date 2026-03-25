@@ -1,19 +1,16 @@
+import json
 import os
-import smtplib
-import ssl
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 import pytz
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 PKT = pytz.timezone("Asia/Karachi")
 
-SMTP_HOST = "smtp.gmail.com"
-SMTP_PORT = 587
+SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
 
 ALERT_TYPES = {"BUY", "SELL - PROFIT", "SELL - STOP LOSS", "DAILY SUMMARY", "ERROR"}
 
@@ -117,7 +114,7 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
 
 def send_alert(alert_type: str, trade_data: dict, portfolio_data: dict) -> bool:
     """
-    Send a formatted email alert.
+    Send a formatted email alert via SendGrid HTTP API.
 
     Parameters
     ----------
@@ -127,32 +124,39 @@ def send_alert(alert_type: str, trade_data: dict, portfolio_data: dict) -> bool:
 
     Returns True on success, False on failure (does NOT re-raise).
     """
+    api_key  = os.getenv("SENDGRID_API_KEY")
     sender   = os.getenv("EMAIL_SENDER")
-    password = os.getenv("EMAIL_APP_PASSWORD")
     receiver = os.getenv("EMAIL_RECEIVER")
 
-    if not all([sender, password, receiver]):
-        print("[email_alerts] Missing email credentials in .env — alert not sent.")
+    if not all([api_key, sender, receiver]):
+        print("[email_alerts] Missing SENDGRID_API_KEY / EMAIL_SENDER / EMAIL_RECEIVER in .env — alert not sent.")
         return False
 
     subject = _build_subject(alert_type, trade_data)
     body    = _build_body(alert_type, trade_data, portfolio_data)
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = sender
-    msg["To"]      = receiver
-    msg.attach(MIMEText(body, "plain"))
+    payload = {
+        "personalizations": [{"to": [{"email": receiver}]}],
+        "from": {"email": sender},
+        "subject": subject,
+        "content": [{"type": "text/plain", "value": body}],
+    }
 
     try:
-        context = ssl.create_default_context()
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as smtp:
-            smtp.ehlo()
-            smtp.starttls(context=context)
-            smtp.login(sender, password)
-            smtp.sendmail(sender, receiver, msg.as_string())
-        print(f"[email_alerts] Sent: {subject}")
-        return True
+        response = requests.post(
+            SENDGRID_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            data=json.dumps(payload),
+            timeout=10,
+        )
+        if response.status_code in (200, 202):
+            print(f"[email_alerts] Sent: {subject}")
+            return True
+        print(f"[email_alerts] SendGrid error {response.status_code}: {response.text}")
+        return False
     except Exception as e:
         print(f"[email_alerts] Failed to send email: {e}")
         return False
