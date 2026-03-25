@@ -31,6 +31,8 @@ load_dotenv()
 CONFIG_FILE = Path("config.json")
 PKT = pytz.timezone("Asia/Karachi")
 
+Path("logs").mkdir(parents=True, exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",

@@ -2,6 +2,7 @@
 *.db
 compound_state.json
 logs/
+backups/
 __pycache__/
 *.pyc
 *.pyo
