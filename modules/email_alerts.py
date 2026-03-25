@@ -1,6 +1,9 @@
+import base64
 import json
 import os
 from datetime import datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 import pytz
 import requests
@@ -10,13 +13,29 @@ load_dotenv()
 
 PKT = pytz.timezone("Asia/Karachi")
 
-SENDGRID_API_URL = "https://api.sendgrid.com/v3/mail/send"
+GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GMAIL_SEND_URL  = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
 
 ALERT_TYPES = {"BUY", "SELL - PROFIT", "SELL - STOP LOSS", "DAILY SUMMARY", "ERROR"}
 
 
 def _now_pkt() -> str:
     return datetime.now(PKT).strftime("%Y-%m-%d %H:%M PKT")
+
+
+def _get_access_token() -> str:
+    resp = requests.post(
+        GMAIL_TOKEN_URL,
+        data={
+            "client_id":     os.getenv("GMAIL_CLIENT_ID"),
+            "client_secret": os.getenv("GMAIL_CLIENT_SECRET"),
+            "refresh_token": os.getenv("GMAIL_REFRESH_TOKEN"),
+            "grant_type":    "refresh_token",
+        },
+        timeout=10,
+    )
+    resp.raise_for_status()
+    return resp.json()["access_token"]
 
 
 def _build_subject(alert_type: str, trade_data: dict) -> str:
@@ -37,8 +56,6 @@ def _build_subject(alert_type: str, trade_data: dict) -> str:
 
 
 def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
-    """Compose the plain-text email body."""
-
     sep = "─" * 25
 
     if alert_type == "ERROR":
@@ -49,13 +66,13 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
         )
 
     if alert_type == "DAILY SUMMARY":
-        start   = portfolio_data.get("starting",    0.0)
-        current = portfolio_data.get("current",     0.0)
-        pnl_day = portfolio_data.get("pnl_today",   0.0)
-        pnl_tot = portfolio_data.get("total_pnl",   0.0)
+        start       = portfolio_data.get("starting",    0.0)
+        current     = portfolio_data.get("current",     0.0)
+        pnl_day     = portfolio_data.get("pnl_today",   0.0)
+        pnl_tot     = portfolio_data.get("total_pnl",   0.0)
         pnl_day_pct = (pnl_day / start * 100) if start else 0.0
         pnl_tot_pct = (pnl_tot / start * 100) if start else 0.0
-        trades  = portfolio_data.get("trades_today", 0)
+        trades      = portfolio_data.get("trades_today", 0)
 
         return (
             f"DAILY SUMMARY\n{sep}\n"
@@ -70,18 +87,18 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
         )
 
     # ── Trade alerts (BUY / SELL variants) ────────────────────────────────────
-    t_type    = trade_data.get("type",        alert_type)
-    pair      = trade_data.get("pair",        "BTC/USDT")
-    price     = trade_data.get("price",       0.0)
-    amount    = trade_data.get("amount",      0.0)
-    signal    = trade_data.get("signal",      "—")
-    sl_price  = trade_data.get("stop_loss",   None)
-    tp_price  = trade_data.get("take_profit", None)
+    t_type   = trade_data.get("type",        alert_type)
+    pair     = trade_data.get("pair",        "BTC/USDT")
+    price    = trade_data.get("price",       0.0)
+    amount   = trade_data.get("amount",      0.0)
+    signal   = trade_data.get("signal",      "—")
+    sl_price = trade_data.get("stop_loss",   None)
+    tp_price = trade_data.get("take_profit", None)
 
-    start     = portfolio_data.get("starting",  0.0)
-    current   = portfolio_data.get("current",   0.0)
-    pnl_day   = portfolio_data.get("pnl_today", 0.0)
-    pnl_tot   = portfolio_data.get("total_pnl", 0.0)
+    start       = portfolio_data.get("starting",  0.0)
+    current     = portfolio_data.get("current",   0.0)
+    pnl_day     = portfolio_data.get("pnl_today", 0.0)
+    pnl_tot     = portfolio_data.get("total_pnl", 0.0)
     pnl_day_pct = (pnl_day / start * 100) if start else 0.0
     pnl_tot_pct = (pnl_tot / start * 100) if start else 0.0
 
@@ -114,7 +131,7 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
 
 def send_alert(alert_type: str, trade_data: dict, portfolio_data: dict) -> bool:
     """
-    Send a formatted email alert via SendGrid HTTP API.
+    Send a formatted email alert via the Gmail REST API (HTTPS, no SMTP needed).
 
     Parameters
     ----------
@@ -124,38 +141,39 @@ def send_alert(alert_type: str, trade_data: dict, portfolio_data: dict) -> bool:
 
     Returns True on success, False on failure (does NOT re-raise).
     """
-    api_key  = os.getenv("SENDGRID_API_KEY")
-    sender   = os.getenv("EMAIL_SENDER")
-    receiver = os.getenv("EMAIL_RECEIVER")
+    client_id     = os.getenv("GMAIL_CLIENT_ID")
+    client_secret = os.getenv("GMAIL_CLIENT_SECRET")
+    refresh_token = os.getenv("GMAIL_REFRESH_TOKEN")
+    sender        = os.getenv("EMAIL_SENDER")
+    receiver      = os.getenv("EMAIL_RECEIVER")
 
-    if not all([api_key, sender, receiver]):
-        print("[email_alerts] Missing SENDGRID_API_KEY / EMAIL_SENDER / EMAIL_RECEIVER in .env — alert not sent.")
+    if not all([client_id, client_secret, refresh_token, sender, receiver]):
+        print("[email_alerts] Missing Gmail credentials in .env — alert not sent.")
         return False
 
     subject = _build_subject(alert_type, trade_data)
     body    = _build_body(alert_type, trade_data, portfolio_data)
 
-    payload = {
-        "personalizations": [{"to": [{"email": receiver}]}],
-        "from": {"email": sender},
-        "subject": subject,
-        "content": [{"type": "text/plain", "value": body}],
-    }
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = sender
+    msg["To"]      = receiver
+    msg.attach(MIMEText(body, "plain"))
+
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode("utf-8")
 
     try:
+        access_token = _get_access_token()
         response = requests.post(
-            SENDGRID_API_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            data=json.dumps(payload),
+            GMAIL_SEND_URL,
+            headers={"Authorization": f"Bearer {access_token}"},
+            json={"raw": raw},
             timeout=10,
         )
         if response.status_code in (200, 202):
             print(f"[email_alerts] Sent: {subject}")
             return True
-        print(f"[email_alerts] SendGrid error {response.status_code}: {response.text}")
+        print(f"[email_alerts] Gmail API error {response.status_code}: {response.text}")
         return False
     except Exception as e:
         print(f"[email_alerts] Failed to send email: {e}")
@@ -164,15 +182,15 @@ def send_alert(alert_type: str, trade_data: dict, portfolio_data: dict) -> bool:
 
 if __name__ == "__main__":
     trade = {
-        "type":           "BUY",
-        "pair":           "BTC/USDT",
-        "price":          67_842.00,
-        "amount":         35.00,
-        "signal":         "Bullish Engulfing + RSI 34",
-        "stop_loss":      67_503.00,
-        "take_profit":    68_218.00,
-        "stop_loss_pct":  0.5,
-        "take_profit_pct":1.2,
+        "type":            "BUY",
+        "pair":            "BTC/USDT",
+        "price":           67_842.00,
+        "amount":          35.00,
+        "signal":          "Bullish Engulfing + RSI 34",
+        "stop_loss":       67_503.00,
+        "take_profit":     68_218.00,
+        "stop_loss_pct":   0.5,
+        "take_profit_pct": 1.2,
     }
     portfolio = {
         "starting":  35.00,

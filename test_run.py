@@ -35,7 +35,9 @@ def check_env() -> bool:
     required = [
         "BINANCE_API_KEY",
         "BINANCE_SECRET_KEY",
-        "SENDGRID_API_KEY",
+        "GMAIL_CLIENT_ID",
+        "GMAIL_CLIENT_SECRET",
+        "GMAIL_REFRESH_TOKEN",
         "EMAIL_SENDER",
         "EMAIL_RECEIVER",
     ]
@@ -43,7 +45,7 @@ def check_env() -> bool:
     if missing:
         print(f"{FAIL} .env is missing: {', '.join(missing)}")
         return False
-    print(f"{PASS} .env — all 5 credentials loaded")
+    print(f"{PASS} .env — all 7 credentials loaded")
     return True
 
 
@@ -163,7 +165,7 @@ def check_email(config) -> None:
         if ok:
             print(f"{PASS} email_alerts — test email sent! Check your inbox.")
         else:
-            print(f"{FAIL} email_alerts — send failed (check SENDGRID_API_KEY in .env)")
+            print(f"{FAIL} email_alerts — send failed (check GMAIL_* credentials in .env)")
     except Exception as e:
         print(f"{FAIL} email_alerts — {e}")
         traceback.print_exc()

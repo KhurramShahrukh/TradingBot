@@ -1,4 +1,5 @@
 .env
+credentials.json
 *.db
 compound_state.json
 logs/
