@@ -49,9 +49,11 @@ _state: dict = {
     "buy_price":      None,
     "buy_quantity":   None,    # base-asset qty held (BTC, ETH, …)
     "buy_amount":     None,    # USDT spent on entry
-    "stop_loss":      None,
-    "take_profit":    None,
-    "signal_at_buy":  None,
+    "stop_loss":         None,
+    "take_profit":       None,
+    "stop_loss_pct":     None,
+    "take_profit_pct":   None,
+    "signal_at_buy":     None,
     "daily_halt":     False,   # True if daily loss limit hit today
 }
 
@@ -149,6 +151,8 @@ def bot_cycle() -> None:
                 position_open=True,
                 buy_price=_state["buy_price"],
                 current_price=price,
+                entry_stop_loss_pct=_state.get("stop_loss_pct"),
+                entry_take_profit_pct=_state.get("take_profit_pct"),
             )
             log.info(
                 f"[{pair}] Signal: {sig['signal']} — {sig['reason']} "
@@ -182,9 +186,11 @@ def bot_cycle() -> None:
                 _state["buy_price"]     = None
                 _state["buy_quantity"]  = None
                 _state["buy_amount"]    = None
-                _state["stop_loss"]     = None
-                _state["take_profit"]   = None
-                _state["signal_at_buy"] = None
+                _state["stop_loss"]       = None
+                _state["take_profit"]     = None
+                _state["stop_loss_pct"]   = None
+                _state["take_profit_pct"] = None
+                _state["signal_at_buy"]   = None
             else:
                 log.info(f"[{pair}] HOLD — position open, waiting for exit signal.")
             return
@@ -210,7 +216,9 @@ def bot_cycle() -> None:
                     continue
 
                 balance = get_current_balance(start)
-                params  = get_risk_parameters(price, balance, config)
+                params  = get_risk_parameters(
+                    price, balance, config, satisfied_legs=sig.get("buy_legs")
+                )
                 amount  = params["position_size_usdt"]
 
                 if amount < 10:
@@ -224,9 +232,11 @@ def bot_cycle() -> None:
                 _state["buy_price"]     = order["price"]
                 _state["buy_quantity"]  = order["quantity"]
                 _state["buy_amount"]    = order["amount"]
-                _state["stop_loss"]     = params["stop_loss_price"]
-                _state["take_profit"]   = params["take_profit_price"]
-                _state["signal_at_buy"] = sig["reason"]
+                _state["stop_loss"]       = params["stop_loss_price"]
+                _state["take_profit"]     = params["take_profit_price"]
+                _state["stop_loss_pct"]   = params["stop_loss_pct"]
+                _state["take_profit_pct"] = params["take_profit_pct"]
+                _state["signal_at_buy"]   = sig["reason"]
 
                 portfolio = get_portfolio_snapshot(start)
 

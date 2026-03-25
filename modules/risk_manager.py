@@ -24,6 +24,31 @@ def get_position_size(balance_usdt: float, trade_amount_pct: float, min_order_us
     return amount
 
 
+def resolve_risk_pct_from_config(
+    config: dict,
+    satisfied_legs: int | None = None,
+) -> tuple[float, float]:
+    """
+    Return (stop_loss_pct, take_profit_pct).
+
+    If ``risk_by_buy_min_conditions`` has an entry for ``satisfied_legs``
+    (1–3 = how many BUY legs passed on this bar), those values win.
+    Otherwise top-level ``stop_loss_pct`` / ``take_profit_pct`` are used.
+
+    ``buy_min_conditions`` only gates whether a BUY fires; it does not select risk.
+    """
+    if satisfied_legs is not None:
+        legs = max(1, min(3, int(satisfied_legs)))
+        mapping = config.get("risk_by_buy_min_conditions") or {}
+        entry = mapping.get(str(legs))
+        if isinstance(entry, dict):
+            sl = entry.get("stop_loss_pct")
+            tp = entry.get("take_profit_pct")
+            if sl is not None and tp is not None:
+                return float(sl), float(tp)
+    return float(config.get("stop_loss_pct", 0.5)), float(config.get("take_profit_pct", 1.2))
+
+
 def is_daily_loss_limit_breached(starting_balance: float, config: dict) -> bool:
     """
     Compare today's realised P&L against the daily loss limit.
@@ -39,9 +64,17 @@ def is_daily_loss_limit_breached(starting_balance: float, config: dict) -> bool:
     return loss_pct >= daily_loss_limit_pct
 
 
-def get_risk_parameters(buy_price: float, balance_usdt: float, config: dict) -> dict:
+def get_risk_parameters(
+    buy_price: float,
+    balance_usdt: float,
+    config: dict,
+    satisfied_legs: int | None = None,
+) -> dict:
     """
     Return a complete risk parameter dict for a new position.
+
+    ``satisfied_legs`` (1–3) selects ``risk_by_buy_min_conditions`` for this entry;
+    omit it to use only top-level stop/take-profit from config.
 
     Keys:
         position_size_usdt  — USDT to spend
@@ -50,8 +83,9 @@ def get_risk_parameters(buy_price: float, balance_usdt: float, config: dict) -> 
         stop_loss_pct       — configured stop-loss %
         take_profit_pct     — configured take-profit %
     """
-    stop_loss_pct   = config.get("stop_loss_pct",   0.5)
-    take_profit_pct = config.get("take_profit_pct", 1.2)
+    stop_loss_pct, take_profit_pct = resolve_risk_pct_from_config(
+        config, satisfied_legs=satisfied_legs
+    )
     trade_amount_pct= config.get("trade_amount_pct",100)
 
     return {

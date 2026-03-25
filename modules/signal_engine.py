@@ -1,6 +1,7 @@
 import pandas as pd
 from modules.indicators import add_indicators, get_latest_indicators
 from modules.patterns import detect_pattern, is_bullish_pattern, is_bearish_pattern
+from modules.risk_manager import resolve_risk_pct_from_config
 
 
 def generate_signal(
@@ -9,17 +10,21 @@ def generate_signal(
     position_open: bool = False,
     buy_price: float | None = None,
     current_price: float | None = None,
+    entry_stop_loss_pct: float | None = None,
+    entry_take_profit_pct: float | None = None,
 ) -> dict:
     """
     Analyse indicators + candlestick patterns and return a signal dict.
 
     BUY (config-driven):
-        Three legs: bullish pattern, RSI < rsi_oversold, close > EMA21.
-        buy_min_conditions: 2 → any two legs; 3 → all three (strict / default).
+        Three legs: bullish pattern, RSI < rsi_oversold, close > EMA slow.
+        buy_min_conditions: minimum legs that must pass to fire (1–3). Risk tiers
+        use the actual leg count on that bar (see ``buy_legs`` on BUY signals).
 
     Signal dict keys:
         signal        — "BUY" | "SELL" | "HOLD"
         reason        — human-readable explanation
+        buy_legs      — on BUY only: how many legs passed (1–3)
         pattern       — detected candlestick pattern name or None
         rsi           — current RSI value
         ema_fast      — current EMA fast value
@@ -38,8 +43,14 @@ def generate_signal(
 
     rsi_oversold   = config.get("rsi_oversold",  35)
     rsi_overbought = config.get("rsi_overbought", 65)
-    stop_loss_pct  = config.get("stop_loss_pct",  0.5)
-    take_profit_pct= config.get("take_profit_pct",1.2)
+
+    if position_open and buy_price is not None and (
+        entry_stop_loss_pct is not None and entry_take_profit_pct is not None
+    ):
+        stop_loss_pct = entry_stop_loss_pct
+        take_profit_pct = entry_take_profit_pct
+    else:
+        stop_loss_pct, take_profit_pct = resolve_risk_pct_from_config(config)
 
     result = {
         "signal":   "HOLD",
@@ -100,6 +111,7 @@ def generate_signal(
             result.update(
                 signal="BUY",
                 reason=" + ".join(parts) if parts else f"{satisfied}/{min_req} conditions",
+                buy_legs=satisfied,
             )
             return result
 
