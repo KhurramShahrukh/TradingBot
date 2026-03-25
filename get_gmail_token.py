@@ -5,8 +5,9 @@ Steps:
   1. Follow the Google Cloud Console setup guide (see README or chat instructions).
   2. Download credentials.json into this project folder.
   3. Run:  python get_gmail_token.py
-  4. A browser window will open — log in with khurramshahrukh18@gmail.com and allow access.
-  5. Copy the three values printed at the end into your .env file.
+  4. Copy the URL printed in the terminal and open it in your browser.
+  5. Log in with khurramshahrukh18@gmail.com, click Allow, then come back to the terminal.
+  6. Copy the three values printed at the end into your .env file.
 
 This script is only needed once. The refresh token never expires unless you
 revoke access in your Google account settings.
@@ -33,11 +34,19 @@ if not CREDENTIALS_FILE.exists():
     print("  Rename the downloaded file to credentials.json and place it here.")
     sys.exit(1)
 
-print("Opening browser for Google login...")
-print("Log in with khurramshahrukh18@gmail.com and click Allow.\n")
-
 flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-creds = flow.run_local_server(port=0)
+
+print("\n" + "=" * 60)
+print("ACTION REQUIRED:")
+print("=" * 60)
+print("1. Copy the URL below and open it in your browser")
+print("2. Log in with khurramshahrukh18@gmail.com and click Allow")
+print("3. You'll be redirected to a page that may show an error")
+print("   — that's fine. Copy the FULL URL from the address bar")
+print("   and paste it below when prompted.")
+print("=" * 60 + "\n")
+
+creds = flow.run_local_server(port=0, open_browser=False)
 
 print("\n" + "=" * 60)
 print("SUCCESS — add these three lines to your .env file:")
