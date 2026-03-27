@@ -16,6 +16,39 @@ def get_exchange():
     return exchange
 
 
+def _as_float(x) -> float | None:
+    """Parse a ticker/OHLC field; None or invalid → None."""
+    if x is None:
+        return None
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if v == v else None  # reject NaN
+
+
+def _price_from_ticker(ticker: dict) -> float | None:
+    """
+    Best-effort spot price from a ccxt unified ticker.
+
+    Some pairs (e.g. stablecoins) may omit ``last``; fall back to ``close``,
+    mid bid/ask, or bid/ask alone.
+    """
+    for key in ("last", "close"):
+        p = _as_float(ticker.get(key))
+        if p is not None and p > 0:
+            return p
+    bid = _as_float(ticker.get("bid"))
+    ask = _as_float(ticker.get("ask"))
+    if bid is not None and ask is not None and bid > 0 and ask > 0:
+        return (bid + ask) / 2
+    if bid is not None and bid > 0:
+        return bid
+    if ask is not None and ask > 0:
+        return ask
+    return None
+
+
 def fetch_ohlcv(pair: str = "BTC/USDT", timeframe: str = "1h", limit: int = 100) -> pd.DataFrame:
     """
     Fetch the last `limit` closed candles for `pair` on `timeframe`.
@@ -47,7 +80,12 @@ def get_current_price(pair: str = "BTC/USDT") -> float:
     exchange = get_exchange()
     try:
         ticker = exchange.fetch_ticker(pair)
-        return float(ticker["last"])
+        p = _price_from_ticker(ticker)
+        if p is None:
+            raise RuntimeError(
+                f"No usable price in ticker for {pair} (last/close/bid/ask missing)"
+            )
+        return p
     except (ccxt.NetworkError, ccxt.ExchangeError) as e:
         raise RuntimeError(f"Error fetching ticker: {e}") from e
 

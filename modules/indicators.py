@@ -70,6 +70,10 @@ def get_latest_indicators(df: pd.DataFrame) -> dict:
         val = row.get(col)
         return round(float(val), decimals) if val is not None and pd.notna(val) else None
 
+    close_val = _safe("close", 2)
+    if close_val is None:
+        raise ValueError("Last candle close is missing or invalid")
+
     return {
         "rsi":         _safe("rsi",         2),
         "macd":        _safe("macd",        4),
@@ -77,7 +81,7 @@ def get_latest_indicators(df: pd.DataFrame) -> dict:
         "macd_hist":   _safe("macd_hist",   4),
         "ema_fast":    _safe("ema_fast",    2),
         "ema_slow":    _safe("ema_slow",    2),
-        "close":       round(float(row["close"]), 2),
+        "close":       close_val,
     }
 
 
