@@ -31,7 +31,7 @@
     "PEPE/USDT",
     "SHIB/USDT"
   ],
-  "timeframe": "30m",
+  "timeframe": "15m",
   "trade_amount_pct": 100,
   "risk_by_buy_min_conditions": {
     "2": { "stop_loss_pct": 0.25, "take_profit_pct": 0.5 },
