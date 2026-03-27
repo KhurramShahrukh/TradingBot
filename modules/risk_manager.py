@@ -1,5 +1,16 @@
 from modules.trade_logger import get_today_pnl
 
+TRADING_STRATEGY_DAY = "day_trading"
+TRADING_STRATEGY_SWING = "swing"
+
+
+def normalize_trading_strategy(config: dict) -> str:
+    """Return ``swing`` only when ``trading_strategy`` is ``swing``; any other value → day_trading."""
+    raw = str(config.get("trading_strategy", "")).strip().lower()
+    if raw == TRADING_STRATEGY_SWING:
+        return TRADING_STRATEGY_SWING
+    return TRADING_STRATEGY_DAY
+
 
 def calculate_stop_loss(buy_price: float, stop_loss_pct: float) -> float:
     """Return the price at which the stop-loss triggers."""
@@ -76,17 +87,32 @@ def get_risk_parameters(
     ``satisfied_legs`` (1–3) selects ``risk_by_buy_min_conditions`` for this entry;
     omit it to use only top-level stop/take-profit from config.
 
+    For ``trading_strategy`` = ``swing``, only a stop-loss is set;
+    ``take_profit_pct`` / ``take_profit_price`` are None (exits on reversal pattern).
+
     Keys:
         position_size_usdt  — USDT to spend
         stop_loss_price     — price that triggers stop-loss
-        take_profit_price   — price that triggers take-profit
+        take_profit_price   — price that triggers take-profit (None for swing mode)
         stop_loss_pct       — configured stop-loss %
-        take_profit_pct     — configured take-profit %
+        take_profit_pct     — configured take-profit % (None for swing mode)
     """
+    trade_amount_pct = config.get("trade_amount_pct", 100)
+
+    if normalize_trading_strategy(config) == TRADING_STRATEGY_SWING:
+        swing_cfg = config.get("swing") or config.get("buy_low_sell_high") or {}
+        stop_loss_pct = float(swing_cfg.get("stop_loss_pct", 3.0))
+        return {
+            "position_size_usdt": get_position_size(balance_usdt, trade_amount_pct),
+            "stop_loss_price":    calculate_stop_loss(buy_price, stop_loss_pct),
+            "take_profit_price":  None,
+            "stop_loss_pct":      stop_loss_pct,
+            "take_profit_pct":    None,
+        }
+
     stop_loss_pct, take_profit_pct = resolve_risk_pct_from_config(
         config, satisfied_legs=satisfied_legs
     )
-    trade_amount_pct= config.get("trade_amount_pct",100)
 
     return {
         "position_size_usdt": get_position_size(balance_usdt, trade_amount_pct),

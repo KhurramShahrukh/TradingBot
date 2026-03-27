@@ -235,9 +235,9 @@ def bot_cycle() -> None:
                 _state["buy_quantity"]  = order["quantity"]
                 _state["buy_amount"]    = order["amount"]
                 _state["stop_loss"]       = params["stop_loss_price"]
-                _state["take_profit"]     = params["take_profit_price"]
+                _state["take_profit"]     = params.get("take_profit_price")
                 _state["stop_loss_pct"]   = params["stop_loss_pct"]
-                _state["take_profit_pct"] = params["take_profit_pct"]
+                _state["take_profit_pct"] = params.get("take_profit_pct")
                 _state["signal_at_buy"]   = sig["reason"]
 
                 portfolio = get_portfolio_snapshot(start)
@@ -245,21 +245,28 @@ def bot_cycle() -> None:
                 log_trade("BUY", pair, order["price"], order["amount"],
                           sig["reason"], 0.0, portfolio["current"])
 
-                send_alert("BUY", {
-                    "type":            "BUY",
-                    "pair":            pair,
-                    "price":           order["price"],
-                    "amount":          order["amount"],
-                    "signal":          sig["reason"],
-                    "stop_loss":       params["stop_loss_price"],
-                    "take_profit":     params["take_profit_price"],
-                    "stop_loss_pct":   params["stop_loss_pct"],
-                    "take_profit_pct": params["take_profit_pct"],
-                }, portfolio)
+                buy_alert = {
+                    "type":          "BUY",
+                    "pair":          pair,
+                    "price":         order["price"],
+                    "amount":        order["amount"],
+                    "signal":        sig["reason"],
+                    "stop_loss":     params["stop_loss_price"],
+                    "stop_loss_pct": params["stop_loss_pct"],
+                }
+                if params.get("take_profit_price") is not None:
+                    buy_alert["take_profit"] = params["take_profit_price"]
+                    buy_alert["take_profit_pct"] = params["take_profit_pct"]
+                send_alert("BUY", buy_alert, portfolio)
 
+                tp_log = (
+                    f"TP=${params['take_profit_price']:,.2f}"
+                    if params.get("take_profit_price") is not None
+                    else "TP=— (ride until bearish reversal)"
+                )
                 log.info(
                     f"BUY executed ({pair}): ${amount:.2f} USDT @ ${order['price']:,.2f}  "
-                    f"SL=${params['stop_loss_price']:,.2f}  TP=${params['take_profit_price']:,.2f}"
+                    f"SL=${params['stop_loss_price']:,.2f}  {tp_log}"
                 )
                 return
             except Exception as pair_exc:
@@ -313,7 +320,14 @@ def main() -> None:
     paper  = config.get("paper_trading", True)
 
     tf = config.get("timeframe", "15m")
-    log.info("Pairs: %s | Timeframe: %s | Paper: %s", ", ".join(pairs), tf, paper)
+    strat = config.get("trading_strategy", "day_trading")
+    log.info(
+        "Pairs: %s | Timeframe: %s | Paper: %s | Strategy: %s",
+        ", ".join(pairs),
+        tf,
+        paper,
+        strat,
+    )
 
     scheduler = BlockingScheduler(timezone=PKT)
 

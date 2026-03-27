@@ -1,7 +1,11 @@
 import pandas as pd
 from modules.indicators import add_indicators, get_latest_indicators
 from modules.patterns import detect_pattern, is_bullish_pattern, is_bearish_pattern
-from modules.risk_manager import resolve_risk_pct_from_config
+from modules.risk_manager import (
+    TRADING_STRATEGY_SWING,
+    normalize_trading_strategy,
+    resolve_risk_pct_from_config,
+)
 
 
 def generate_signal(
@@ -18,8 +22,16 @@ def generate_signal(
 
     BUY (config-driven):
         Three legs: bullish pattern, RSI < rsi_oversold, close > EMA slow.
-        buy_min_conditions: minimum legs that must pass to fire (1–3). Risk tiers
-        use the actual leg count on that bar (see ``buy_legs`` on BUY signals).
+
+        * ``trading_strategy`` ``day_trading``: ``buy_min_conditions`` (1–3) gates
+          how many legs must pass; risk tiers use ``buy_legs`` on BUY signals.
+
+        * ``trading_strategy`` ``swing``: **all three** legs must pass.
+
+    SELL when ``swing`` and a position is open:
+        Stop-loss only (no fixed take-profit); exit on bearish reversal pattern.
+        RSI-overbought exits are **not** used (ride the move). Day-trading mode
+        keeps take-profit, bearish pattern, and RSI-overbought exits.
 
     Signal dict keys:
         signal        — "BUY" | "SELL" | "HOLD"
@@ -43,11 +55,13 @@ def generate_signal(
 
     rsi_oversold   = config.get("rsi_oversold",  35)
     rsi_overbought = config.get("rsi_overbought", 65)
+    strategy = normalize_trading_strategy(config)
 
-    if position_open and buy_price is not None and (
-        entry_stop_loss_pct is not None and entry_take_profit_pct is not None
-    ):
-        stop_loss_pct = entry_stop_loss_pct
+    if position_open and buy_price is not None:
+        if entry_stop_loss_pct is not None:
+            stop_loss_pct = entry_stop_loss_pct
+        else:
+            stop_loss_pct, _ = resolve_risk_pct_from_config(config)
         take_profit_pct = entry_take_profit_pct
     else:
         stop_loss_pct, take_profit_pct = resolve_risk_pct_from_config(config)
@@ -64,22 +78,26 @@ def generate_signal(
 
     # ── SELL checks (highest priority when a position is open) ────────────────
     if position_open and buy_price is not None:
-        stop_price   = buy_price * (1 - stop_loss_pct   / 100)
-        target_price = buy_price * (1 + take_profit_pct / 100)
+        stop_price = buy_price * (1 - stop_loss_pct / 100)
 
         if price <= stop_price:
             result.update(signal="SELL", reason=f"Stop-loss hit @ ${price:,.2f} (limit ${stop_price:,.2f})")
             return result
 
-        if price >= target_price:
-            result.update(signal="SELL", reason=f"Take-profit hit @ ${price:,.2f} (target ${target_price:,.2f})")
-            return result
+        if take_profit_pct is not None:
+            target_price = buy_price * (1 + take_profit_pct / 100)
+            if price >= target_price:
+                result.update(
+                    signal="SELL",
+                    reason=f"Take-profit hit @ ${price:,.2f} (target ${target_price:,.2f})",
+                )
+                return result
 
         if is_bearish_pattern(pattern):
             result.update(signal="SELL", reason=f"Bearish pattern: {pattern}")
             return result
 
-        if rsi is not None and rsi > rsi_overbought:
+        if strategy != TRADING_STRATEGY_SWING and rsi is not None and rsi > rsi_overbought:
             result.update(signal="SELL", reason=f"RSI overbought: {rsi:.1f} > {rsi_overbought}")
             return result
 
@@ -91,9 +109,11 @@ def generate_signal(
         rsi_ok              = rsi is not None and rsi < rsi_oversold
         trend_ok            = above_ema_slow
 
-        # How many of the three legs must be true (2 = more trades, 3 = strict/original)
-        min_req = int(config.get("buy_min_conditions", 3))
-        min_req = max(1, min(3, min_req))
+        if strategy == TRADING_STRATEGY_SWING:
+            min_req = 3
+        else:
+            min_req = int(config.get("buy_min_conditions", 3))
+            min_req = max(1, min(3, min_req))
 
         satisfied = int(bullish_pat_present) + int(rsi_ok) + int(trend_ok)
 

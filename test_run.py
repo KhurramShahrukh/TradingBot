@@ -59,7 +59,11 @@ def check_config() -> dict | None:
             pair_line = ", ".join(plist)
         else:
             pair_line = cfg.get("trading_pair", "BTC/USDT")
-        print(f"{PASS} config.json — paper_trading={paper}, pairs={pair_line}, tf={cfg['timeframe']}")
+        strat = cfg.get("trading_strategy", "day_trading")
+        print(
+            f"{PASS} config.json — paper_trading={paper}, pairs={pair_line}, "
+            f"tf={cfg['timeframe']}, strategy={strat}"
+        )
         if not paper:
             print("       WARNING: paper_trading is FALSE — bot will place REAL orders!")
         return cfg
@@ -131,9 +135,11 @@ def check_risk_manager(price, config) -> None:
         from modules.risk_manager import get_risk_parameters, is_daily_loss_limit_breached
         start = config.get("starting_balance_usdt", 34.0)
         params = get_risk_parameters(price, start, config)
+        tp = params.get("take_profit_price")
+        tp_part = f"TP=${tp:,.2f}" if tp is not None else "TP=— (swing / no fixed target)"
         print(
             f"{PASS} risk_manager — size=${params['position_size_usdt']:.2f}, "
-            f"SL=${params['stop_loss_price']:,.2f}, TP=${params['take_profit_price']:,.2f}"
+            f"SL=${params['stop_loss_price']:,.2f}, {tp_part}"
         )
     except Exception as e:
         print(f"{FAIL} risk_manager — {e}")
