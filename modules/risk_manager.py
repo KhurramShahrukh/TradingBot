@@ -90,12 +90,18 @@ def get_risk_parameters(
     For ``trading_strategy`` = ``swing``, only a stop-loss is set;
     ``take_profit_pct`` / ``take_profit_price`` are None (exits on reversal pattern).
 
+    When ``hold_until_profit`` is enabled, ``max_loss_pct`` is the hard emergency
+    exit (default 3%).  Normal ``stop_loss_pct`` is still stored but the signal
+    engine will ignore it in favour of ``max_loss_pct``.
+
     Keys:
         position_size_usdt  — USDT to spend
         stop_loss_price     — price that triggers stop-loss
         take_profit_price   — price that triggers take-profit (None for swing mode)
         stop_loss_pct       — configured stop-loss %
         take_profit_pct     — configured take-profit % (None for swing mode)
+        max_loss_pct        — hard max-loss % (only when hold_until_profit is on)
+        max_loss_price      — price that triggers the hard max-loss exit
     """
     trade_amount_pct = config.get("trade_amount_pct", 100)
 
@@ -114,13 +120,20 @@ def get_risk_parameters(
         config, satisfied_legs=satisfied_legs
     )
 
-    return {
+    params = {
         "position_size_usdt": get_position_size(balance_usdt, trade_amount_pct),
         "stop_loss_price":    calculate_stop_loss(buy_price, stop_loss_pct),
         "take_profit_price":  calculate_take_profit(buy_price, take_profit_pct),
         "stop_loss_pct":      stop_loss_pct,
         "take_profit_pct":    take_profit_pct,
     }
+
+    if config.get("hold_until_profit", False):
+        max_loss_pct = float(config.get("max_loss_pct", 3.0))
+        params["max_loss_pct"]   = max_loss_pct
+        params["max_loss_price"] = calculate_stop_loss(buy_price, max_loss_pct)
+
+    return params
 
 
 if __name__ == "__main__":

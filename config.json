@@ -61,11 +61,13 @@
     "VIRTUAL/USDT"
   ],
   "timeframe": "15m",
-  "_comment_trading_strategy": "Use \"swing\" for buy-low/sell-high (ride trend, exit on bearish pattern). Any other value (e.g. day_trading) uses the original day-trading rules.",
-  "trading_strategy": "swing",
+  "_comment_trading_strategy": "day_trading with hold_until_profit: ignore normal stop-loss/patterns/RSI, only exit on take-profit or max_loss_pct hard stop.",
+  "trading_strategy": "day_trading",
   "swing": {
     "stop_loss_pct": 3.0
   },
+  "hold_until_profit": true,
+  "max_loss_pct": 3.0,
   "trade_amount_pct": 100,
   "risk_by_buy_min_conditions": {
     "2": { "stop_loss_pct": 0.25, "take_profit_pct": 0.5 },
@@ -74,7 +76,7 @@
   "daily_loss_limit_pct": 3.0,
   "rsi_oversold": 35,
   "rsi_overbought": 65,
-  "buy_min_conditions": 3,
+  "buy_min_conditions": 2,
   "ema_fast": 9,
   "ema_slow": 21,
   "paper_trading": true,

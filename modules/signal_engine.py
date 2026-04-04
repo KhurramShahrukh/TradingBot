@@ -16,6 +16,7 @@ def generate_signal(
     current_price: float | None = None,
     entry_stop_loss_pct: float | None = None,
     entry_take_profit_pct: float | None = None,
+    entry_max_loss_pct: float | None = None,
 ) -> dict:
     """
     Analyse indicators + candlestick patterns and return a signal dict.
@@ -28,10 +29,19 @@ def generate_signal(
 
         * ``trading_strategy`` ``swing``: **all three** legs must pass.
 
-    SELL when ``swing`` and a position is open:
-        Stop-loss only (no fixed take-profit); exit on bearish reversal pattern.
-        RSI-overbought exits are **not** used (ride the move). Day-trading mode
-        keeps take-profit, bearish pattern, and RSI-overbought exits.
+    SELL modes:
+        **hold_until_profit** (config flag):
+            Ignores normal stop-loss, bearish patterns, and RSI-overbought.
+            Only two exits:
+            1. Take-profit reached (default 0.5%) → SELL with profit.
+            2. Max-loss breached (default 3%)     → emergency SELL.
+            Philosophy: price always bounces back eventually, so hold
+            through dips and only panic-sell at a catastrophic threshold.
+
+        **Normal day-trading**: stop-loss, take-profit, bearish pattern,
+            RSI-overbought exits.
+
+        **Swing**: stop-loss + bearish reversal pattern only.
 
     Signal dict keys:
         signal        — "BUY" | "SELL" | "HOLD"
@@ -78,6 +88,47 @@ def generate_signal(
 
     # ── SELL checks (highest priority when a position is open) ────────────────
     if position_open and buy_price is not None:
+        hold_until_profit = config.get("hold_until_profit", False)
+
+        if hold_until_profit:
+            max_loss_pct = entry_max_loss_pct
+            if max_loss_pct is None:
+                max_loss_pct = float(config.get("max_loss_pct", 3.0))
+
+            max_loss_price = buy_price * (1 - max_loss_pct / 100)
+            if price <= max_loss_price:
+                loss_now = (buy_price - price) / buy_price * 100
+                result.update(
+                    signal="SELL",
+                    reason=(
+                        f"Max-loss hard stop @ ${price:,.2f} "
+                        f"({loss_now:.2f}% loss, limit {max_loss_pct:.1f}%)"
+                    ),
+                )
+                return result
+
+            if take_profit_pct is not None:
+                target_price = buy_price * (1 + take_profit_pct / 100)
+                if price >= target_price:
+                    profit_now = (price - buy_price) / buy_price * 100
+                    result.update(
+                        signal="SELL",
+                        reason=(
+                            f"Take-profit hit @ ${price:,.2f} "
+                            f"(+{profit_now:.2f}%, target ${target_price:,.2f})"
+                        ),
+                    )
+                    return result
+
+            pnl_pct = (price - buy_price) / buy_price * 100
+            result.update(
+                reason=(
+                    f"HOLD — waiting for +{take_profit_pct or 0.5:.1f}% profit "
+                    f"(current {pnl_pct:+.2f}%)"
+                ),
+            )
+            return result
+
         stop_price = buy_price * (1 - stop_loss_pct / 100)
 
         if price <= stop_price:

@@ -55,6 +55,8 @@ _state: dict = {
     "take_profit":       None,
     "stop_loss_pct":     None,
     "take_profit_pct":   None,
+    "max_loss_pct":      None,
+    "max_loss_price":    None,
     "signal_at_buy":     None,
     "daily_halt":     False,   # True if daily loss limit hit today
 }
@@ -155,6 +157,7 @@ def bot_cycle() -> None:
                 current_price=price,
                 entry_stop_loss_pct=_state.get("stop_loss_pct"),
                 entry_take_profit_pct=_state.get("take_profit_pct"),
+                entry_max_loss_pct=_state.get("max_loss_pct"),
             )
             log.info(
                 f"[{pair}] Signal: {sig['signal']} — {sig['reason']} "
@@ -192,6 +195,8 @@ def bot_cycle() -> None:
                 _state["take_profit"]     = None
                 _state["stop_loss_pct"]   = None
                 _state["take_profit_pct"] = None
+                _state["max_loss_pct"]    = None
+                _state["max_loss_price"]  = None
                 _state["signal_at_buy"]   = None
             else:
                 log.info(f"[{pair}] HOLD — position open, waiting for exit signal.")
@@ -238,6 +243,8 @@ def bot_cycle() -> None:
                 _state["take_profit"]     = params.get("take_profit_price")
                 _state["stop_loss_pct"]   = params["stop_loss_pct"]
                 _state["take_profit_pct"] = params.get("take_profit_pct")
+                _state["max_loss_pct"]    = params.get("max_loss_pct")
+                _state["max_loss_price"]  = params.get("max_loss_price")
                 _state["signal_at_buy"]   = sig["reason"]
 
                 portfolio = get_portfolio_snapshot(start)
@@ -257,6 +264,10 @@ def bot_cycle() -> None:
                 if params.get("take_profit_price") is not None:
                     buy_alert["take_profit"] = params["take_profit_price"]
                     buy_alert["take_profit_pct"] = params["take_profit_pct"]
+                if params.get("max_loss_pct") is not None:
+                    buy_alert["max_loss"]     = params["max_loss_price"]
+                    buy_alert["max_loss_pct"] = params["max_loss_pct"]
+                    buy_alert["mode"] = "hold_until_profit"
                 send_alert("BUY", buy_alert, portfolio)
 
                 tp_log = (
@@ -264,9 +275,14 @@ def bot_cycle() -> None:
                     if params.get("take_profit_price") is not None
                     else "TP=— (ride until bearish reversal)"
                 )
+                ml_log = (
+                    f"  MaxLoss=${params['max_loss_price']:,.2f} ({params['max_loss_pct']}%)"
+                    if params.get("max_loss_price") is not None
+                    else ""
+                )
                 log.info(
                     f"BUY executed ({pair}): ${amount:.2f} USDT @ ${order['price']:,.2f}  "
-                    f"SL=${params['stop_loss_price']:,.2f}  {tp_log}"
+                    f"SL=${params['stop_loss_price']:,.2f}  {tp_log}{ml_log}"
                 )
                 return
             except Exception as pair_exc:
@@ -321,6 +337,7 @@ def main() -> None:
 
     tf = config.get("timeframe", "15m")
     strat = config.get("trading_strategy", "day_trading")
+    hold_mode = config.get("hold_until_profit", False)
     log.info(
         "Pairs: %s | Timeframe: %s | Paper: %s | Strategy: %s",
         ", ".join(pairs),
@@ -328,6 +345,15 @@ def main() -> None:
         paper,
         strat,
     )
+    if hold_mode:
+        log.info(
+            "Hold-until-profit ON: TP=%.1f%%, hard max-loss=%.1f%% "
+            "(ignoring normal SL, patterns, RSI-overbought)",
+            float(config.get("risk_by_buy_min_conditions", {}).get(
+                str(config.get("buy_min_conditions", 2)), {}
+            ).get("take_profit_pct", config.get("take_profit_pct", 0.5))),
+            float(config.get("max_loss_pct", 3.0)),
+        )
 
     scheduler = BlockingScheduler(timezone=PKT)
 
