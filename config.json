@@ -79,6 +79,6 @@
   "buy_min_conditions": 2,
   "ema_fast": 9,
   "ema_slow": 21,
-  "paper_trading": true,
+  "paper_trading": false,
   "starting_balance_usdt": 34.00
 }

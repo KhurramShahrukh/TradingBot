@@ -40,7 +40,7 @@ def update_balance_after_trade(starting_balance: float, pnl: float) -> float:
     return new_balance
 
 
-def get_portfolio_snapshot(starting_balance: float) -> dict:
+def get_portfolio_snapshot(starting_balance: float, live_usdt: float | None = None) -> dict:
     """
     Return a portfolio summary dict suitable for email alerts and logging.
 
@@ -50,10 +50,16 @@ def get_portfolio_snapshot(starting_balance: float) -> dict:
         pnl_today   — today's realised P&L
         total_pnl   — all-time realised P&L
         total_pct   — all-time return %
+
+    When ``live_usdt`` is set (live trading), ``current`` is that value — free USDT
+    on the exchange — instead of starting + DB P&L.
     """
     state   = _load_state(starting_balance)
     start   = state["starting"]
-    current = get_current_balance(starting_balance)
+    if live_usdt is not None:
+        current = round(float(live_usdt), 2)
+    else:
+        current = get_current_balance(starting_balance)
     pnl_day = get_today_pnl()
     pnl_tot = get_total_pnl()
     pct     = (pnl_tot / start * 100) if start else 0.0

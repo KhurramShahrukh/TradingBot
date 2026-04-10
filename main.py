@@ -17,7 +17,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from dotenv import load_dotenv
 
 from modules.compound_tracker import get_current_balance, get_portfolio_snapshot, update_balance_after_trade
-from modules.data_feed import fetch_ohlcv, get_current_price
+from modules.data_feed import fetch_ohlcv, get_balance_usdt, get_current_price
 from modules.email_alerts import send_alert
 from modules.order_executor import execute_buy, execute_sell
 from modules.risk_manager import get_risk_parameters, is_daily_loss_limit_breached
@@ -124,6 +124,23 @@ def bot_cycle() -> None:
 
     log.info("─── bot_cycle started (%s) — watching %d pairs ───", _pkt_now(), len(pairs))
 
+    live_usdt: float | None = None
+    if not paper:
+        try:
+            live_usdt = get_balance_usdt()
+            log.info("Live spot USDT (free): $%.2f", live_usdt)
+        except Exception as exc:
+            log.error("Live mode: could not fetch USDT balance: %s", exc)
+            try:
+                send_alert(
+                    "ERROR",
+                    {"error_message": f"Live mode: USDT balance fetch failed: {exc}"},
+                    get_portfolio_snapshot(start),
+                )
+            except Exception:
+                log.error("Also failed to send balance error email.")
+            return
+
     try:
         # 1. Check daily halt flag
         if _state["daily_halt"]:
@@ -136,11 +153,9 @@ def bot_cycle() -> None:
             send_alert(
                 "ERROR",
                 {"error_message": "Daily loss limit breached. Bot halted until tomorrow."},
-                get_portfolio_snapshot(start),
+                get_portfolio_snapshot(start, live_usdt=live_usdt),
             )
             return
-
-        portfolio = get_portfolio_snapshot(start)
 
         # ── 2–5: With an open position, only manage that pair (SELL / HOLD) ───
         if _state["position_open"] and _state.get("active_pair"):
@@ -171,10 +186,22 @@ def bot_cycle() -> None:
                 new_balance = update_balance_after_trade(start, pnl)
 
                 alert_type = "SELL - PROFIT" if pnl >= 0 else "SELL - STOP LOSS"
-                portfolio  = get_portfolio_snapshot(start)
+                if not paper:
+                    try:
+                        live_usdt = get_balance_usdt()
+                    except Exception as exc:
+                        log.warning("Could not refresh USDT after SELL: %s", exc)
+                portfolio  = get_portfolio_snapshot(start, live_usdt=live_usdt)
 
-                log_trade(alert_type, pair, order["price"], order["amount"],
-                          sig["reason"], pnl, new_balance)
+                log_trade(
+                    alert_type,
+                    pair,
+                    order["price"],
+                    order["amount"],
+                    sig["reason"],
+                    pnl,
+                    portfolio["current"] if not paper else new_balance,
+                )
 
                 send_alert(alert_type, {
                     "type":   alert_type,
@@ -222,7 +249,14 @@ def bot_cycle() -> None:
                 if sig["signal"] != "BUY":
                     continue
 
-                balance = get_current_balance(start)
+                if not paper:
+                    try:
+                        live_usdt = get_balance_usdt()
+                    except Exception as bal_exc:
+                        log.warning("Skipping %s: could not fetch USDT balance: %s", pair, bal_exc)
+                        continue
+
+                balance = live_usdt if not paper else get_current_balance(start)
                 params  = get_risk_parameters(
                     price, balance, config, satisfied_legs=sig.get("buy_legs")
                 )
@@ -233,6 +267,12 @@ def bot_cycle() -> None:
                     continue
 
                 order = execute_buy(pair, amount, price, paper=paper)
+
+                if not paper:
+                    try:
+                        live_usdt = get_balance_usdt()
+                    except Exception as exc:
+                        log.warning("Could not refresh USDT after BUY: %s", exc)
 
                 _state["position_open"] = True
                 _state["active_pair"]   = pair
@@ -247,7 +287,7 @@ def bot_cycle() -> None:
                 _state["max_loss_price"]  = params.get("max_loss_price")
                 _state["signal_at_buy"]   = sig["reason"]
 
-                portfolio = get_portfolio_snapshot(start)
+                portfolio = get_portfolio_snapshot(start, live_usdt=live_usdt)
 
                 log_trade("BUY", pair, order["price"], order["amount"],
                           sig["reason"], 0.0, portfolio["current"])
@@ -294,10 +334,19 @@ def bot_cycle() -> None:
     except Exception as exc:
         log.exception("Unhandled error in bot_cycle: %s", exc)
         try:
+            err_live = None
+            if not config.get("paper_trading", True):
+                try:
+                    err_live = get_balance_usdt()
+                except Exception:
+                    pass
             send_alert(
                 "ERROR",
                 {"error_message": f"{type(exc).__name__}: {exc}"},
-                get_portfolio_snapshot(config.get("starting_balance_usdt", 34.00)),
+                get_portfolio_snapshot(
+                    config.get("starting_balance_usdt", 34.00),
+                    live_usdt=err_live,
+                ),
             )
         except Exception:
             log.error("Also failed to send error email.")
@@ -309,7 +358,13 @@ def send_daily_summary() -> None:
     config  = load_config()
     start   = config.get("starting_balance_usdt", 34.00)
     pairs   = get_trading_pairs(config)
-    snap    = get_portfolio_snapshot(start)
+    live_usdt = None
+    if not config.get("paper_trading", True):
+        try:
+            live_usdt = get_balance_usdt()
+        except Exception as exc:
+            log.warning("Daily summary: could not fetch live USDT: %s", exc)
+    snap    = get_portfolio_snapshot(start, live_usdt=live_usdt)
     today   = datetime.now(PKT).date().isoformat()
     trades  = get_today_trade_count()
 
