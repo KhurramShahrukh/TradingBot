@@ -13,6 +13,17 @@ from modules.exchange_fees import (
 load_dotenv()
 
 
+def _free_usdt(balance: dict) -> float:
+    """CCXT may expose USDT under ``balance['USDT']['free']`` or ``balance['free']['USDT']``."""
+    u = balance.get("USDT")
+    if isinstance(u, dict) and u.get("free") is not None:
+        return float(u["free"])
+    free = balance.get("free")
+    if isinstance(free, dict) and free.get("USDT") is not None:
+        return float(free["USDT"])
+    return 0.0
+
+
 def _get_exchange() -> ccxt.binance:
     return ccxt.binance({
         "apiKey":          os.getenv("BINANCE_API_KEY"),
@@ -77,14 +88,32 @@ def _paper_sell(pair: str, quantity: float, price: float) -> dict:
 # ── Live order placement ───────────────────────────────────────────────────────
 
 def _live_buy(pair: str, amount_usdt: float) -> dict:
-    """Place a real market BUY order on Binance (cost = amount_usdt)."""
+    """
+    Place a real market BUY on Binance for ``amount_usdt`` quote (USDT) spent.
+
+    Uses ``create_market_buy_order_with_cost`` so CCXT always sends
+    ``quoteOrderQty`` / ``cost``. A plain ``create_market_buy_order(symbol,
+    amount)`` treats ``amount`` as **base** size when the quote path is not
+    applied — e.g. ``amount=35`` can mean **35 TAO**, not **$35 USDT**, which
+    triggers insufficient balance with a small USDT wallet.
+    """
     exchange = _get_exchange()
     try:
-        order = exchange.create_market_buy_order(
-            symbol=pair,
-            amount=amount_usdt,
-            params={"quoteOrderQty": amount_usdt},
-        )
+        balance = exchange.fetch_balance()
+        free_usdt = _free_usdt(balance)
+        if free_usdt <= 0:
+            raise RuntimeError(f"No free USDT for BUY (free={free_usdt})")
+        # Cap to wallet; 100% + rounding can otherwise exceed free slightly.
+        spend = min(float(amount_usdt), free_usdt)
+        spend = float(exchange.cost_to_precision(pair, spend))
+        if spend > free_usdt:
+            spend = float(exchange.cost_to_precision(pair, free_usdt * 0.999))
+        if spend < 10:
+            raise RuntimeError(
+                f"USDT spend below minimum after balance/precision "
+                f"(spend={spend}, free={free_usdt}, requested={amount_usdt})"
+            )
+        order = exchange.create_market_buy_order_with_cost(pair, spend)
         filled_price = float(order.get("average") or order.get("price") or 0)
         filled_qty = float(order.get("filled") or 0)
         net_base = net_base_after_buy_order(order, pair)
@@ -96,7 +125,7 @@ def _live_buy(pair: str, amount_usdt: float) -> dict:
             "type":     "BUY",
             "pair":     pair,
             "price":    filled_price,
-            "amount":   amount_usdt,
+            "amount":   spend,
             "quantity": qty_out,
             "status":   order.get("status", "unknown"),
             "paper":    False,
