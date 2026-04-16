@@ -79,11 +79,19 @@ def get_current_price(pair: str = "BTC/USDT") -> float:
     """Return the latest ticker price for `pair`."""
     exchange = get_exchange()
     try:
+        exchange.load_markets()
+        market = exchange.markets.get(pair)
+        if market is not None and market.get("active") is False:
+            raise RuntimeError(
+                f"Market {pair} is not active on Binance (delisted or halted). "
+                f"Remove it from trading_pairs in config.json."
+            )
         ticker = exchange.fetch_ticker(pair)
         p = _price_from_ticker(ticker)
         if p is None:
             raise RuntimeError(
-                f"No usable price in ticker for {pair} (last/close/bid/ask missing)"
+                f"No usable price in ticker for {pair} (last/close/bid/ask missing). "
+                f"If this pair is delisted or illiquid, remove it from trading_pairs."
             )
         return p
     except (ccxt.NetworkError, ccxt.ExchangeError) as e:
