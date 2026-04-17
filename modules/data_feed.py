@@ -11,7 +11,12 @@ def get_exchange():
         "apiKey": os.getenv("BINANCE_API_KEY"),
         "secret": os.getenv("BINANCE_SECRET_KEY"),
         "enableRateLimit": True,
-        "options": {"defaultType": "spot"},
+        "options": {
+            "defaultType": "spot",
+            # Avoid SAPI GET /sapi/v1/capital/config/getall on load_markets (coin/network
+            # metadata). Not needed for spot balance or our strategies; fewer auth calls.
+            "fetchCurrencies": False,
+        },
     })
     return exchange
 
