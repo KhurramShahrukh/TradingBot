@@ -2,7 +2,7 @@
 main.py — Trading Bot entry point.
 
 Starts an APScheduler job that runs bot_cycle() on each candle close for the
-timeframe set in config.json (e.g. 15m → every 15 minutes).  All configuration
+timeframe set in config.json (e.g. 5m → every 5 minutes).  All configuration
 is loaded from config.json; all credentials from .env.
 """
 
@@ -72,7 +72,7 @@ def _cron_minute_for_timeframe(timeframe: str) -> str | int:
     Map CCXT timeframe string to APScheduler cron `minute` expression.
     Aligns bot_cycle with each candle close for that interval.
     """
-    tf = (timeframe or "15m").strip().lower()
+    tf = (timeframe or "5m").strip().lower()
     match tf:
         case "1m":
             return "*"
@@ -85,8 +85,8 @@ def _cron_minute_for_timeframe(timeframe: str) -> str | int:
         case "1h" | "60m":
             return 0
         case _:
-            # Unknown timeframe — default to 15m cadence (safe for active trading)
-            return "0,15,30,45"
+            # Unknown timeframe — default to 5m cadence
+            return "*/5"
 
 
 def _pkt_now() -> str:
@@ -204,11 +204,12 @@ def bot_cycle() -> None:
                 )
 
                 send_alert(alert_type, {
-                    "type":   alert_type,
-                    "pair":   pair,
-                    "price":  order["price"],
-                    "amount": order["amount"],
-                    "signal": sig["reason"],
+                    "type":      alert_type,
+                    "pair":      pair,
+                    "price":     order["price"],
+                    "amount":    order["amount"],
+                    "signal":    sig["reason"],
+                    "timeframe": config.get("timeframe", "5m"),
                 }, portfolio)
 
                 log.info(f"SELL executed ({pair}): P&L=${pnl:+.4f}  new balance=${new_balance:.2f}")
@@ -300,6 +301,7 @@ def bot_cycle() -> None:
                     "signal":        sig["reason"],
                     "stop_loss":     params["stop_loss_price"],
                     "stop_loss_pct": params["stop_loss_pct"],
+                    "timeframe":     config.get("timeframe", "5m"),
                 }
                 if params.get("take_profit_price") is not None:
                     buy_alert["take_profit"] = params["take_profit_price"]
@@ -390,7 +392,7 @@ def main() -> None:
     pairs  = get_trading_pairs(config)
     paper  = config.get("paper_trading", True)
 
-    tf = config.get("timeframe", "15m")
+    tf = config.get("timeframe", "5m")
     strat = config.get("trading_strategy", "day_trading")
     hold_mode = config.get("hold_until_profit", False)
     log.info(

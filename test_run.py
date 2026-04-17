@@ -77,7 +77,7 @@ def check_data_feed(config: dict) -> tuple:
         from modules.data_feed import fetch_ohlcv, get_current_price
         plist = config.get("trading_pairs")
         pair = plist[0] if isinstance(plist, list) and plist else config.get("trading_pair", "BTC/USDT")
-        tf = config.get("timeframe", "15m")
+        tf = config.get("timeframe", "5m")
         df = fetch_ohlcv(pair, tf, limit=100)
         price = get_current_price(pair)
         base = pair.split("/")[0]

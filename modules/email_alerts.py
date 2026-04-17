@@ -94,6 +94,12 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
     signal   = trade_data.get("signal",      "—")
     sl_price = trade_data.get("stop_loss",   None)
     tp_price = trade_data.get("take_profit", None)
+    tf       = trade_data.get("timeframe")
+    mode     = trade_data.get("mode")
+    max_loss_price = trade_data.get("max_loss")
+    max_loss_pct = trade_data.get("max_loss_pct")
+    sl_pct = trade_data.get("stop_loss_pct")
+    tp_pct = trade_data.get("take_profit_pct")
 
     start       = portfolio_data.get("starting",  0.0)
     current     = portfolio_data.get("current",   0.0)
@@ -102,21 +108,37 @@ def _build_body(alert_type: str, trade_data: dict, portfolio_data: dict) -> str:
     pnl_day_pct = (pnl_day / start * 100) if start else 0.0
     pnl_tot_pct = (pnl_tot / start * 100) if start else 0.0
 
-    sl_line = f"Stop-loss:     ${sl_price:,.2f} (-{trade_data.get('stop_loss_pct', 0.5):.1f}%)" if sl_price else ""
-    tp_line = f"Take-profit:   ${tp_price:,.2f} (+{trade_data.get('take_profit_pct', 1.2):.1f}%)" if tp_price else ""
+    interval_line = f"Interval:      {tf}\n" if tf else ""
 
     trade_section = (
         f"Trade Summary\n{sep}\n"
+        f"{interval_line}"
         f"Type:          {t_type}\n"
         f"Pair:          {pair}\n"
         f"Price:         ${price:,.2f}\n"
         f"Amount:        ${amount:.2f} USDT\n"
         f"Signal:        {signal}\n"
     )
-    if sl_line:
-        trade_section += f"{sl_line}\n"
-    if tp_line:
-        trade_section += f"{tp_line}\n"
+
+    # hold_until_profit: do not show the tight "reference" SL from risk tiers —
+    # exits are take-profit or hard max-loss only (see signal_engine).
+    if mode == "hold_until_profit" and max_loss_price is not None:
+        trade_section += f"\nExit plan\n{sep}\n"
+        if tp_price is not None and tp_pct is not None:
+            trade_section += f"Take-profit:   ${tp_price:,.2f} (+{float(tp_pct):.2f}%)\n"
+        trade_section += (
+            f"Hard max-loss: ${float(max_loss_price):,.2f} (-{float(max_loss_pct):.2f}%)  "
+            f"(emergency exit only)\n"
+            "\n"
+            "Note: Risk-tier stop % values are not used for routine exits in this mode.\n"
+        )
+    else:
+        if sl_price is not None and sl_pct is not None:
+            trade_section += f"Stop-loss:     ${sl_price:,.2f} (-{float(sl_pct):.2f}%)\n"
+        if tp_price is not None and tp_pct is not None:
+            trade_section += f"Take-profit:   ${tp_price:,.2f} (+{float(tp_pct):.2f}%)\n"
+        elif tp_price is not None:
+            trade_section += f"Take-profit:   ${tp_price:,.2f}\n"
 
     portfolio_section = (
         f"\nPortfolio\n{sep}\n"
@@ -187,10 +209,14 @@ if __name__ == "__main__":
         "price":           67_842.00,
         "amount":          35.00,
         "signal":          "Bullish Engulfing + RSI 34",
-        "stop_loss":       67_503.00,
-        "take_profit":     68_218.00,
-        "stop_loss_pct":   0.5,
-        "take_profit_pct": 1.2,
+        "stop_loss":       67_672.40,
+        "take_profit":     68_181.21,
+        "stop_loss_pct":   0.25,
+        "take_profit_pct": 0.5,
+        "max_loss":        65_806.74,
+        "max_loss_pct":    3.0,
+        "mode":            "hold_until_profit",
+        "timeframe":       "5m",
     }
     portfolio = {
         "starting":  35.00,
