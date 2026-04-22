@@ -59,7 +59,7 @@
     "DEXE/USDT",
     "VIRTUAL/USDT"
   ],
-  "timeframe": "5m",
+  "timeframe": "15m",
   "_comment_trading_strategy": "day_trading with hold_until_profit: ignore normal stop-loss/patterns/RSI, only exit on take-profit or max_loss_pct hard stop.",
   "trading_strategy": "day_trading",
   "swing": {
