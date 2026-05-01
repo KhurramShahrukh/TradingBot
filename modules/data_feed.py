@@ -1,24 +1,59 @@
 import os
+import logging
+import time
 import ccxt
 import pandas as pd
 from dotenv import load_dotenv
 
 load_dotenv()
 
+log = logging.getLogger(__name__)
+
+_NETWORK_RETRY_ATTEMPTS = 3
+_NETWORK_RETRY_BASE_DELAY_SECONDS = 2
+_EXCHANGE: ccxt.binance | None = None
+
+
 def get_exchange():
     """Initialise and return an authenticated Binance exchange object."""
-    exchange = ccxt.binance({
-        "apiKey": os.getenv("BINANCE_API_KEY"),
-        "secret": os.getenv("BINANCE_SECRET_KEY"),
-        "enableRateLimit": True,
-        "options": {
-            "defaultType": "spot",
-            # Avoid SAPI GET /sapi/v1/capital/config/getall on load_markets (coin/network
-            # metadata). Not needed for spot balance or our strategies; fewer auth calls.
-            "fetchCurrencies": False,
-        },
-    })
-    return exchange
+    global _EXCHANGE
+    if _EXCHANGE is None:
+        _EXCHANGE = ccxt.binance({
+            "apiKey": os.getenv("BINANCE_API_KEY"),
+            "secret": os.getenv("BINANCE_SECRET_KEY"),
+            "enableRateLimit": True,
+            "timeout": 20_000,
+            "options": {
+                "defaultType": "spot",
+                # Avoid loading futures/delivery markets for a spot bot. Without this,
+                # CCXT may call dapi.binance.com/dapi/v1/exchangeInfo during load_markets.
+                "fetchMarkets": {"types": ["spot"]},
+                # Avoid SAPI GET /sapi/v1/capital/config/getall on load_markets (coin/network
+                # metadata). Not needed for spot balance or our strategies; fewer auth calls.
+                "fetchCurrencies": False,
+            },
+        })
+    return _EXCHANGE
+
+
+def _with_network_retries(label: str, func):
+    """Retry short-lived Binance/network failures before surfacing an error."""
+    for attempt in range(1, _NETWORK_RETRY_ATTEMPTS + 1):
+        try:
+            return func()
+        except ccxt.NetworkError as exc:
+            if attempt >= _NETWORK_RETRY_ATTEMPTS:
+                raise
+            delay = _NETWORK_RETRY_BASE_DELAY_SECONDS * attempt
+            log.warning(
+                "%s network error (attempt %d/%d): %s; retrying in %ss",
+                label,
+                attempt,
+                _NETWORK_RETRY_ATTEMPTS,
+                exc,
+                delay,
+            )
+            time.sleep(delay)
 
 
 def _as_float(x) -> float | None:
@@ -62,9 +97,12 @@ def fetch_ohlcv(pair: str = "BTC/USDT", timeframe: str = "1h", limit: int = 100)
         timestamp, open, high, low, close, volume
     The last row is the most recent CLOSED candle (current candle is excluded).
     """
-    exchange = get_exchange()
     try:
-        raw = exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=limit + 1)
+        exchange = get_exchange()
+        raw = _with_network_retries(
+            f"OHLCV {pair} {timeframe}",
+            lambda: exchange.fetch_ohlcv(pair, timeframe=timeframe, limit=limit + 1),
+        )
     except ccxt.NetworkError as e:
         raise ConnectionError(f"Network error fetching OHLCV: {e}") from e
     except ccxt.ExchangeError as e:
@@ -82,16 +120,16 @@ def fetch_ohlcv(pair: str = "BTC/USDT", timeframe: str = "1h", limit: int = 100)
 
 def get_current_price(pair: str = "BTC/USDT") -> float:
     """Return the latest ticker price for `pair`."""
-    exchange = get_exchange()
     try:
-        exchange.load_markets()
+        exchange = get_exchange()
+        _with_network_retries("load Binance spot markets", exchange.load_markets)
         market = exchange.markets.get(pair)
         if market is not None and market.get("active") is False:
             raise RuntimeError(
                 f"Market {pair} is not active on Binance (delisted or halted). "
                 f"Remove it from trading_pairs in config.json."
             )
-        ticker = exchange.fetch_ticker(pair)
+        ticker = _with_network_retries(f"ticker {pair}", lambda: exchange.fetch_ticker(pair))
         p = _price_from_ticker(ticker)
         if p is None:
             raise RuntimeError(
@@ -105,9 +143,9 @@ def get_current_price(pair: str = "BTC/USDT") -> float:
 
 def get_balance_usdt() -> float:
     """Return available USDT balance in the Spot wallet."""
-    exchange = get_exchange()
     try:
-        balance = exchange.fetch_balance()
+        exchange = get_exchange()
+        balance = _with_network_retries("USDT balance", exchange.fetch_balance)
         return float(balance["free"].get("USDT", 0.0))
     except (ccxt.NetworkError, ccxt.ExchangeError) as e:
         raise RuntimeError(f"Error fetching balance: {e}") from e

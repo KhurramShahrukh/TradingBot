@@ -9,7 +9,7 @@ is loaded from config.json; all credentials from .env.
 import json
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytz
@@ -61,6 +61,9 @@ _state: dict = {
     "daily_halt":     False,   # True if daily loss limit hit today
 }
 
+ERROR_ALERT_COOLDOWN = timedelta(minutes=60)
+_last_error_alert: dict = {"key": None, "sent_at": None}
+
 
 def load_config() -> dict:
     with open(CONFIG_FILE) as f:
@@ -91,6 +94,25 @@ def _cron_minute_for_timeframe(timeframe: str) -> str | int:
 
 def _pkt_now() -> str:
     return datetime.now(PKT).strftime("%Y-%m-%d %H:%M PKT")
+
+
+def send_error_alert(error_message: str, portfolio_data: dict, key: str | None = None) -> None:
+    """Send ERROR emails, but suppress repeated identical alerts for a short window."""
+    now = datetime.now(PKT)
+    alert_key = key or error_message
+    sent_at = _last_error_alert.get("sent_at")
+
+    if (
+        _last_error_alert.get("key") == alert_key
+        and sent_at is not None
+        and now - sent_at < ERROR_ALERT_COOLDOWN
+    ):
+        log.warning("Suppressing repeated ERROR email within cooldown: %s", error_message)
+        return
+
+    if send_alert("ERROR", {"error_message": error_message}, portfolio_data):
+        _last_error_alert["key"] = alert_key
+        _last_error_alert["sent_at"] = now
 
 
 def get_trading_pairs(config: dict) -> list[str]:
@@ -132,10 +154,10 @@ def bot_cycle() -> None:
         except Exception as exc:
             log.error("Live mode: could not fetch USDT balance: %s", exc)
             try:
-                send_alert(
-                    "ERROR",
-                    {"error_message": f"Live mode: USDT balance fetch failed: {exc}"},
+                send_error_alert(
+                    f"Live mode: USDT balance fetch failed: {exc}",
                     get_portfolio_snapshot(start),
+                    key="live-usdt-balance-fetch",
                 )
             except Exception:
                 log.error("Also failed to send balance error email.")
@@ -342,13 +364,13 @@ def bot_cycle() -> None:
                     err_live = get_balance_usdt()
                 except Exception:
                     pass
-            send_alert(
-                "ERROR",
-                {"error_message": f"{type(exc).__name__}: {exc}"},
+            send_error_alert(
+                f"{type(exc).__name__}: {exc}",
                 get_portfolio_snapshot(
                     config.get("starting_balance_usdt", 34.00),
                     live_usdt=err_live,
                 ),
+                key=f"{type(exc).__name__}: {exc}",
             )
         except Exception:
             log.error("Also failed to send error email.")
